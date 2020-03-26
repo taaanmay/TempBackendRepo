@@ -15,6 +15,7 @@ import (
 	"golang.org/x/net/context"
 	"google.golang.org/api/option"
 	"fmt"
+	"encoding/json"
 )
 
 var app *firebase.App
@@ -29,6 +30,18 @@ type User struct {
 type requestMessage struct {
 	auth string		"json:auth"
 }
+
+
+type endConversationRequest struct{
+	auth string  "json: auth"
+	guess int    "json: guess"
+}
+
+type newUser struct {
+    username string "json:  username" 
+    score float64 "json: score"
+}
+
 
 func main() {
 	app := authenticateServer()
@@ -167,5 +180,76 @@ func receiveMessageHandler(w http.ResponseWriter, r *http.Request) {
 	chatRoomRef, err := chatRoomsRef.OrderByKey().EqualTo(cid).GetOrdered(ctx)
 
 	messagesRef, err := chatRoomRef.OrderByChild("messages/id").EqualTo(id.UID).GetOrdered(ctx)
+
+}
+
+
+
+func endConversationHandler(w http.ResponseWriter, r *http.Request){
+
+ctx := context.Background()
+//Authenticate User
+var endReq endConversationRequest
+err := json.NewDecoder(r.Body).Decode(&endReq)
+auth:=endReq.auth
+userToken, err := checkUserAuthentication(auth)
+if err!=nil {
+	log.Fatalf("error verifying ID token: %v\n", err)
+} 
+
+
+//get a reference to the chat rooms section of the database
+//cid:= r.URL.Path[1:]
+cid:= r.URL.Path[len("/api/conversation/end/"):]	
+client, err := app.Database(ctx)
+
+ref := client.NewRef("availableGames/chatRoomId")
+//results,err := ref.OrderByKey().EqualTo(cid).GetOrdered(ctx)
+if err != nil{
+	log.Fatalln("Error querying database:", err)
+}
+
+//make this chatroom complete
+//roomStatus := results.Get()
+address := "availableGames/" + cid
+ref = client.NewRef(address)
+err = ref.Set(ctx,"complete")
+if err != nil{
+	log.Fatalln("Error setting value as complete:", err)
+}
+
+// Submit guess
+
+userRef := client.NewRef("leaderboards/user")
+_,err = userRef.OrderByKey().EqualTo(userToken.UID).GetOrdered(ctx)
+if err!= nil{
+
+	if _, err := userRef.Push(ctx, &newUser{
+	username: userToken.UID,
+	score: 1,
+	});
+	err != nil {
+	log.Fatalln("Error pushing child node:", err)
+
+	}
+	return
+}
+//Getting the score of the user
+var nUser newUser
+userAdd := "leaderboards/" + userToken.UID
+userRef = client.NewRef(userAdd)
+ if err = userRef.Get(ctx,&nUser); err!= nil{
+ 	log.Fatalln("Error getting value:", err)}
+
+//Setting the score of the user
+userAdd = "leaderboards/" + userToken.UID + "/score"
+ref = client.NewRef(userAdd)
+userScore := nUser.score + 1;
+err = ref.Set(ctx,userScore)
+if err != nil{
+	log.Fatalln("Error setting value", err)
+}
+
+
 
 }
